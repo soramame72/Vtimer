@@ -28,14 +28,15 @@ fs.readdirSync(commandsPath)
   });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
-  const guildId = newState.guildId ?? oldState.guildId;
+  if (newState.member?.user?.bot) return;
+
+  const guildId = newState.guild?.id ?? oldState.guild?.id;
+  if (!guildId) return;
 
   if (newState.channelId) {
     const key = `${guildId}_${newState.channelId}`;
-    const channel = newState.channel;
-    const humanMembers = channel?.members?.filter((m) => !m.user.bot) ?? new Map();
-
-    if (humanMembers.size === 1 && !client.vcSessionStart.has(key)) {
+    const humans = newState.channel?.members?.filter((m) => !m.user.bot);
+    if (humans?.size === 1 && !client.vcSessionStart.has(key)) {
       client.vcSessionStart.set(key, Date.now());
       console.log(`[vc] セッション開始: ${key}`);
     }
@@ -43,10 +44,8 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 
   if (oldState.channelId) {
     const key = `${guildId}_${oldState.channelId}`;
-    const channel = oldState.channel;
-    const humanMembers = channel?.members?.filter((m) => !m.user.bot) ?? new Map();
-
-    if (humanMembers.size === 0) {
+    const humans = oldState.channel?.members?.filter((m) => !m.user.bot);
+    if (humans?.size === 0) {
       client.vcSessionStart.delete(key);
       console.log(`[vc] セッション終了: ${key}`);
     }

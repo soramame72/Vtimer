@@ -27,7 +27,7 @@ module.exports = {
 
     const voiceChannel =
       interaction.options.getChannel('channel') ??
-      interaction.member.voice?.channel;
+      interaction.member?.voice?.channel ?? null;
 
     if (!voiceChannel) {
       return interaction.editReply({
@@ -37,18 +37,23 @@ module.exports = {
 
     if (client.voiceConnections.has(guildId)) {
       const existing = client.voiceConnections.get(guildId);
-      existing.connection.destroy();
+      try { existing.connection.destroy(); } catch {}
       clearInterval(existing.keepInterval);
       client.voiceConnections.delete(guildId);
     }
 
-    const connection = joinVoiceChannel({
-      channelId: voiceChannel.id,
-      guildId: guildId,
-      adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf: false,
-      selfMute: true,
-    });
+    let connection;
+    try {
+      connection = joinVoiceChannel({
+        channelId: voiceChannel.id,
+        guildId: guildId,
+        adapterCreator: guild.voiceAdapterCreator,
+        selfDeaf: false,
+        selfMute: true,
+      });
+    } catch (e) {
+      return interaction.editReply({ content: `❌ 接続に失敗しました: ${e.message}` });
+    }
 
     const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
     connection.subscribe(player);
@@ -56,11 +61,9 @@ module.exports = {
     try {
       await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
     } catch {
-      connection.destroy();
+      try { connection.destroy(); } catch {}
       return interaction.editReply({ content: '❌ ボイスチャンネルへの接続に失敗しました。' });
     }
-
-    const joinedAt = Date.now();
 
     connection.on(VoiceConnectionStatus.Disconnected, async () => {
       try {
@@ -69,26 +72,27 @@ module.exports = {
           entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
         ]);
       } catch {
-        if (client.voiceConnections.has(guildId)) {
-          const state = client.voiceConnections.get(guildId);
+        const state = client.voiceConnections.get(guildId);
+        if (state) {
           clearInterval(state.keepInterval);
           client.voiceConnections.delete(guildId);
         }
-        connection.destroy();
+        try { connection.destroy(); } catch {}
       }
     });
 
     const keepInterval = setInterval(() => {
-      if (connection.state.status === VoiceConnectionStatus.Ready) {
-        connection.setSpeaking(false);
-      }
+      try {
+        if (connection.state.status === VoiceConnectionStatus.Ready) {
+          connection.setSpeaking(false);
+        }
+      } catch {}
     }, 20_000);
 
     client.voiceConnections.set(guildId, {
       connection,
       keepInterval,
       channelId: voiceChannel.id,
-      joinedAt,
     });
 
     await interaction.editReply({
