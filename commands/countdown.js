@@ -52,7 +52,7 @@ module.exports = {
     .addIntegerOption((o) =>
       o
         .setName('design')
-        .setDescription('Design 1-10  (1=Minimal Dark  2=Neon Cyber  3=Sunset  4=Space  5=Matrix  6=Ocean  7=Fire  8=Aurora  9=Retro  10=Minimal Light)')
+        .setDescription('Design 1-10: 1=Dark 2=Cyber 3=Sunset 4=Space 5=Matrix 6=Ocean 7=Fire 8=Aurora 9=Retro 10=Light')
         .setMinValue(1)
         .setMaxValue(10)
         .setRequired(false)
