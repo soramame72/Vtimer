@@ -28,15 +28,18 @@ fs.readdirSync(commandsPath)
   });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
-  if (newState.member?.user?.bot) return;
+  if (newState.member?.user?.bot || oldState.member?.user?.bot) return;
 
   const guildId = newState.guild?.id ?? oldState.guild?.id;
-  if (!guildId) return;
+  if (!guildId) {
+    console.warn('[vc] guildId が取得できませんでした');
+    return;
+  }
 
   if (newState.channelId) {
     const key = `${guildId}_${newState.channelId}`;
-    const humans = newState.channel?.members?.filter((m) => !m.user.bot);
-    if (humans?.size === 1 && !client.vcSessionStart.has(key)) {
+    const humans = newState.channel?.members?.filter((m) => !m.user.bot) ?? new Map();
+    if (humans.size === 1 && !client.vcSessionStart.has(key)) {
       client.vcSessionStart.set(key, Date.now());
       console.log(`[vc] セッション開始: ${key}`);
     }
@@ -44,8 +47,8 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 
   if (oldState.channelId) {
     const key = `${guildId}_${oldState.channelId}`;
-    const humans = oldState.channel?.members?.filter((m) => !m.user.bot);
-    if (humans?.size === 0) {
+    const humans = oldState.channel?.members?.filter((m) => !m.user.bot) ?? new Map();
+    if (humans.size === 0) {
       client.vcSessionStart.delete(key);
       console.log(`[vc] セッション終了: ${key}`);
     }
@@ -70,7 +73,7 @@ client.on('interactionCreate', async (interaction) => {
     await command.execute(interaction, client);
   } catch (error) {
     console.error('[interactionCreate] エラー:', error.message);
-    const msg = { content: 'コマンドの実行中にエラーが発生しました。', flags: 64 };
+    const msg = { content: 'An error occurred.', flags: 64 };
     try {
       if (interaction.deferred) await interaction.editReply(msg);
       else if (!interaction.replied) await interaction.reply(msg);
@@ -82,9 +85,9 @@ client.on('error', (e) => console.error('[client error]', e.message));
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e?.message ?? e));
 
 client.once('ready', async () => {
-  console.log(`✅ ${client.user.tag} でログインしました`);
+  console.log(`✅ ${client.user.tag} logged in`);
   await preloadFonts();
-  console.log('[font] プリロード完了');
+  console.log('[font] preload done');
 
   for (const guild of client.guilds.cache.values()) {
     for (const channel of guild.channels.cache.values()) {
@@ -93,7 +96,7 @@ client.once('ready', async () => {
       if (humans?.size > 0) {
         const key = `${guild.id}_${channel.id}`;
         client.vcSessionStart.set(key, Date.now());
-        console.log(`[vc] 起動時セッション検出: ${key}`);
+        console.log(`[vc] existing session: ${key}`);
       }
     }
   }

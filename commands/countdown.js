@@ -18,7 +18,7 @@ function parseHMS(str) {
   return h * 3600 + m * 60 + s;
 }
 
-function formatHMS(totalSec) {
+function toHMS(totalSec) {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
@@ -28,31 +28,31 @@ function formatHMS(totalSec) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('countdown')
-    .setDescription('VCの継続時間が指定した時間になるまでカウントダウンします')
+    .setDescription('Countdown until the VC duration reaches the specified time')
     .addChannelOption((o) =>
       o
         .setName('vc')
-        .setDescription('対象のボイスチャンネル')
+        .setDescription('Target voice channel')
         .addChannelTypes(ChannelType.GuildVoice)
         .setRequired(true)
     )
     .addStringOption((o) =>
       o
         .setName('time')
-        .setDescription('目標の継続時間 (時間:分:秒) 例: 1:30:00 / 495:19:19')
+        .setDescription('Target duration H:MM:SS  e.g. 1:30:00 / 495:19:19')
         .setRequired(true)
     )
     .addChannelOption((o) =>
       o
         .setName('channel')
-        .setDescription('カウントダウンを送信するテキストチャンネル')
+        .setDescription('Text channel to post the countdown')
         .addChannelTypes(ChannelType.GuildText)
         .setRequired(true)
     )
     .addIntegerOption((o) =>
       o
         .setName('design')
-        .setDescription('デザイン番号 (1〜10)')
+        .setDescription('Design 1-10  (1=Minimal Dark  2=Neon Cyber  3=Sunset  4=Space  5=Matrix  6=Ocean  7=Fire  8=Aurora  9=Retro  10=Minimal Light)')
         .setMinValue(1)
         .setMaxValue(10)
         .setRequired(false)
@@ -61,24 +61,24 @@ module.exports = {
   async execute(interaction, client) {
     await interaction.deferReply({ flags: 64 });
 
-    const vcChannel    = interaction.options.getChannel('vc');
-    const timeStr      = interaction.options.getString('time');
+    const vcChannel     = interaction.options.getChannel('vc');
+    const timeStr       = interaction.options.getString('time');
     const targetChannel = interaction.options.getChannel('channel');
-    const designIndex  = (interaction.options.getInteger('design') ?? 1) - 1;
+    const designIndex   = (interaction.options.getInteger('design') ?? 1) - 1;
 
     const targetTotalSec = parseHMS(timeStr);
-    if (targetTotalSec === null || targetTotalSec <= 0) {
+    if (!targetTotalSec || targetTotalSec <= 0) {
       return interaction.editReply({
-        content: '❌ 形式が正しくありません。`時間:分:秒` で入力してください。\n例: `1:30:00` `495:19:19` `4545:00:00`',
+        content: '❌ Invalid format. Use `H:MM:SS`  e.g. `1:30:00` `495:19:19`',
       });
     }
 
-    const sessionKey = `${interaction.guildId}_${vcChannel.id}`;
+    const sessionKey   = `${interaction.guildId}_${vcChannel.id}`;
     const sessionStart = client.vcSessionStart.get(sessionKey);
 
     if (!sessionStart) {
       return interaction.editReply({
-        content: `❌ **${vcChannel.name}** は現在誰も参加していないか、セッションが記録されていません。`,
+        content: `❌ No active session in **${vcChannel.name}**. Someone must be in the channel first.`,
       });
     }
 
@@ -86,14 +86,15 @@ module.exports = {
 
     if (elapsedSec >= targetTotalSec) {
       return interaction.editReply({
-        content: `❌ **${vcChannel.name}** はすでに目標時間 \`${timeStr}\` を超過しています（継続時間: ${formatHMS(elapsedSec)}）。`,
+        content: `❌ **${vcChannel.name}** already exceeded the target \`${timeStr}\` (elapsed: ${toHMS(elapsedSec)}).`,
       });
     }
 
     const endEpoch = sessionStart + targetTotalSec * 1000;
     const getRemainingSeconds = () => Math.max(0, Math.round((endEpoch - Date.now()) / 1000));
+    const getElapsedSeconds   = () => Math.round((Date.now() - sessionStart) / 1000);
 
-    const guildId = interaction.guildId;
+    const guildId      = interaction.guildId;
     const countdownKey = `${guildId}_${targetChannel.id}`;
 
     if (client.activeCountdowns.has(countdownKey)) {
@@ -101,15 +102,24 @@ module.exports = {
       client.activeCountdowns.delete(countdownKey);
     }
 
-    const imageBuffer = await generateCountdownImage(
-      getRemainingSeconds(), timeStr, designIndex, vcChannel.name
-    );
+    const imageBuffer = await generateCountdownImage({
+      remaining: getRemainingSeconds(),
+      elapsed:   getElapsedSeconds(),
+      target:    timeStr,
+      vcName:    vcChannel.name,
+      designIndex,
+    });
+
     const countdownMessage = await targetChannel.send({
       files: [new AttachmentBuilder(imageBuffer, { name: 'countdown.png' })],
     });
 
     await interaction.editReply({
-      content: `✅ **${vcChannel.name}** の継続時間カウントダウンを <#${targetChannel.id}> で開始しました！\n目標: \`${timeStr}\` / 現在の継続: ${formatHMS(elapsedSec)} / デザイン: **${DESIGN_LABELS[designIndex]}**\nメッセージを削除するとカウントダウンが停止します。`,
+      content: [
+        `✅ Countdown started in <#${targetChannel.id}>`,
+        `VC: **${vcChannel.name}**  |  Target: \`${timeStr}\`  |  Elapsed: ${toHMS(elapsedSec)}  |  Design: **${DESIGN_LABELS[designIndex]}**`,
+        `Delete the message to stop the countdown.`,
+      ].join('\n'),
     });
 
     let lastUpdate = 0;
@@ -122,7 +132,13 @@ module.exports = {
         clearInterval(state.interval);
         client.activeCountdowns.delete(countdownKey);
         try {
-          const buf = await generateCountdownImage(0, timeStr, designIndex, vcChannel.name);
+          const buf = await generateCountdownImage({
+            remaining: 0,
+            elapsed:   getElapsedSeconds(),
+            target:    timeStr,
+            vcName:    vcChannel.name,
+            designIndex,
+          });
           await countdownMessage.edit({
             files: [new AttachmentBuilder(buf, { name: 'countdown.png' })],
           });
@@ -132,11 +148,17 @@ module.exports = {
 
       const now = Date.now();
       if (isUpdating || now - lastUpdate < RATE_LIMIT_MS) return;
-
       isUpdating = true;
       lastUpdate = now;
+
       try {
-        const buf = await generateCountdownImage(remaining, timeStr, designIndex, vcChannel.name);
+        const buf = await generateCountdownImage({
+          remaining,
+          elapsed: getElapsedSeconds(),
+          target:  timeStr,
+          vcName:  vcChannel.name,
+          designIndex,
+        });
         await countdownMessage.edit({
           files: [new AttachmentBuilder(buf, { name: 'countdown.png' })],
         });
@@ -147,7 +169,7 @@ module.exports = {
         } else if (e.status === 429) {
           lastUpdate = Date.now() + Number(e.headers?.get?.('retry-after') ?? 2) * 1000;
         } else {
-          console.error('[countdown] 更新失敗:', e.message);
+          console.error('[countdown] update failed:', e.message);
         }
       } finally {
         isUpdating = false;

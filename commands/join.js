@@ -4,17 +4,18 @@ const {
   VoiceConnectionStatus,
   entersState,
   createAudioPlayer,
+  AudioPlayerStatus,
   NoSubscriberBehavior,
 } = require('@discordjs/voice');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('join')
-    .setDescription('ボイスチャンネルに接続して居座ります')
+    .setDescription('Join a voice channel and stay')
     .addChannelOption((o) =>
       o
         .setName('channel')
-        .setDescription('接続するボイスチャンネル（省略時: あなたが参加中のチャンネル）')
+        .setDescription('Target voice channel (default: your current VC)')
         .addChannelTypes(ChannelType.GuildVoice)
         .setRequired(false)
     ),
@@ -31,38 +32,35 @@ module.exports = {
 
     if (!voiceChannel) {
       return interaction.editReply({
-        content: '❌ ボイスチャンネルを指定するか、ボイスチャンネルに参加してからコマンドを実行してください。',
+        content: '❌ Specify a voice channel or join one first.',
       });
     }
 
     if (client.voiceConnections.has(guildId)) {
       const existing = client.voiceConnections.get(guildId);
-      try { existing.connection.destroy(); } catch {}
       clearInterval(existing.keepInterval);
+      try { existing.connection.destroy(); } catch {}
       client.voiceConnections.delete(guildId);
     }
 
-    let connection;
-    try {
-      connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: guildId,
-        adapterCreator: guild.voiceAdapterCreator,
-        selfDeaf: false,
-        selfMute: true,
-      });
-    } catch (e) {
-      return interaction.editReply({ content: `❌ 接続に失敗しました: ${e.message}` });
-    }
+    const connection = joinVoiceChannel({
+      channelId: voiceChannel.id,
+      guildId: guildId,
+      adapterCreator: guild.voiceAdapterCreator,
+      selfDeaf: true,
+      selfMute: true,
+    });
 
-    const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
+    const player = createAudioPlayer({
+      behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
+    });
     connection.subscribe(player);
 
     try {
-      await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
-    } catch {
+      await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+    } catch (e) {
       try { connection.destroy(); } catch {}
-      return interaction.editReply({ content: '❌ ボイスチャンネルへの接続に失敗しました。' });
+      return interaction.editReply({ content: `❌ Failed to connect: ${e.message}` });
     }
 
     connection.on(VoiceConnectionStatus.Disconnected, async () => {
@@ -71,7 +69,9 @@ module.exports = {
           entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
           entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
         ]);
+        console.log('[voice] reconnected');
       } catch {
+        console.log('[voice] disconnected, destroying');
         const state = client.voiceConnections.get(guildId);
         if (state) {
           clearInterval(state.keepInterval);
@@ -81,13 +81,20 @@ module.exports = {
       }
     });
 
+    connection.on('error', (e) => {
+      console.error('[voice connection error]', e.message);
+    });
+
     const keepInterval = setInterval(() => {
       try {
-        if (connection.state.status === VoiceConnectionStatus.Ready) {
+        if (
+          connection.state.status === VoiceConnectionStatus.Ready &&
+          player.state.status === AudioPlayerStatus.Idle
+        ) {
           connection.setSpeaking(false);
         }
       } catch {}
-    }, 20_000);
+    }, 15_000);
 
     client.voiceConnections.set(guildId, {
       connection,
@@ -96,7 +103,7 @@ module.exports = {
     });
 
     await interaction.editReply({
-      content: `✅ **${voiceChannel.name}** に接続しました。\`/leave\` コマンドで退出します。`,
+      content: `✅ Joined **${voiceChannel.name}**. Use \`/leave\` to disconnect.`,
     });
   },
 };
