@@ -30,6 +30,17 @@ client.once('ready', () => {
   keepAlive();
 });
 
+client.on('messageDelete', (message) => {
+  for (const [key, state] of client.activeCountdowns.entries()) {
+    if (state.messageId === message.id) {
+      clearInterval(state.interval);
+      client.activeCountdowns.delete(key);
+      console.log(`[countdown] メッセージ削除によりカウントダウン停止: ${key}`);
+      break;
+    }
+  }
+});
+
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   const command = client.commands.get(interaction.commandName);

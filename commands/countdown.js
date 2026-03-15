@@ -8,14 +8,35 @@ const { generateCountdownImage, DESIGN_LABELS } = require('../utils/imageGenerat
 const UPDATE_INTERVAL_MS = 1_000;
 const RATE_LIMIT_MS = 1_500;
 
+function parseDuration(str) {
+  const match = str.match(/^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i);
+  if (!match || str.trim() === '') return null;
+  const d = parseInt(match[1] || 0);
+  const h = parseInt(match[2] || 0);
+  const m = parseInt(match[3] || 0);
+  const s = parseInt(match[4] || 0);
+  const total = d * 86400 + h * 3600 + m * 60 + s;
+  return total > 0 ? total : null;
+}
+
+function parseTargetTime(str) {
+  const match = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return null;
+  const h = parseInt(match[1]);
+  const m = parseInt(match[2]);
+  const s = parseInt(match[3] || 0);
+  if (h > 23 || m > 59 || s > 59) return null;
+  return { h, m, s };
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('countdown')
-    .setDescription('指定した時刻までのカウントダウンを開始します')
+    .setDescription('カウントダウンを開始します')
     .addStringOption((o) =>
       o
         .setName('time')
-        .setDescription('目標時刻 (例: 20:30)')
+        .setDescription('目標時刻 (例: 20:30) または残り時間 (例: 1h30m, 90m, 100h, 2d12h)')
         .setRequired(true)
     )
     .addChannelOption((o) =>
@@ -39,20 +60,31 @@ module.exports = {
     const targetChannel = interaction.options.getChannel('channel');
     const designIndex = (interaction.options.getInteger('design') ?? 1) - 1;
 
-    const timeMatch = timeStr.match(/^(\d{1,2}):(\d{2})$/);
-    if (!timeMatch) {
-      return interaction.reply({
-        content: '❌ 時刻の形式が正しくありません。`HH:MM` の形式で入力してください（例: `20:30`）',
-        flags: 64,
-      });
-    }
+    let getTargetEpoch;
+    let displayLabel;
 
-    const [, hStr, mStr] = timeMatch;
-    const targetH = parseInt(hStr, 10);
-    const targetM = parseInt(mStr, 10);
-
-    if (targetH > 23 || targetM > 59) {
-      return interaction.reply({ content: '❌ 無効な時刻です。', flags: 64 });
+    const targetTime = parseTargetTime(timeStr);
+    if (targetTime) {
+      const { h, m, s } = targetTime;
+      displayLabel = timeStr;
+      getTargetEpoch = () => {
+        const now = new Date();
+        const target = new Date(now);
+        target.setHours(h, m, s, 0);
+        if (target <= now) target.setDate(target.getDate() + 1);
+        return target.getTime();
+      };
+    } else {
+      const durationSec = parseDuration(timeStr);
+      if (!durationSec) {
+        return interaction.reply({
+          content: '❌ 形式が正しくありません。\n時刻: `20:30` / 残り時間: `1h30m` `90m` `2d12h` `100h`',
+          flags: 64,
+        });
+      }
+      displayLabel = timeStr;
+      const endEpoch = Date.now() + durationSec * 1000;
+      getTargetEpoch = () => endEpoch;
     }
 
     await interaction.deferReply({ flags: 64 });
@@ -65,24 +97,15 @@ module.exports = {
       client.activeCountdowns.delete(countdownKey);
     }
 
-    function getTargetDate() {
-      const now = new Date();
-      const target = new Date(now);
-      target.setHours(targetH, targetM, 0, 0);
-      if (target <= now) target.setDate(target.getDate() + 1);
-      return target;
-    }
+    const getRemainingSeconds = () =>
+      Math.max(0, Math.round((getTargetEpoch() - Date.now()) / 1000));
 
-    function getRemainingSeconds() {
-      return Math.round((getTargetDate() - Date.now()) / 1000);
-    }
-
-    const imageBuffer = await generateCountdownImage(getRemainingSeconds(), timeStr, designIndex);
+    const imageBuffer = await generateCountdownImage(getRemainingSeconds(), displayLabel, designIndex);
     const attachment = new AttachmentBuilder(imageBuffer, { name: 'countdown.png' });
     const countdownMessage = await targetChannel.send({ files: [attachment] });
 
     await interaction.editReply({
-      content: `✅ <#${targetChannel.id}> でカウントダウンを開始しました！　デザイン: **${DESIGN_LABELS[designIndex]}**`,
+      content: `✅ <#${targetChannel.id}> でカウントダウンを開始しました！　デザイン: **${DESIGN_LABELS[designIndex]}**\nメッセージを削除するとカウントダウンが停止します。`,
     });
 
     let lastUpdate = 0;
@@ -95,7 +118,7 @@ module.exports = {
         clearInterval(state.interval);
         client.activeCountdowns.delete(countdownKey);
         try {
-          const buf = await generateCountdownImage(0, timeStr, designIndex);
+          const buf = await generateCountdownImage(0, displayLabel, designIndex);
           const att = new AttachmentBuilder(buf, { name: 'countdown.png' });
           await countdownMessage.edit({ files: [att] });
         } catch {}
@@ -108,15 +131,19 @@ module.exports = {
       isUpdating = true;
       lastUpdate = now;
       try {
-        const buf = await generateCountdownImage(remaining, timeStr, designIndex);
+        const buf = await generateCountdownImage(remaining, displayLabel, designIndex);
         const att = new AttachmentBuilder(buf, { name: 'countdown.png' });
         await countdownMessage.edit({ files: [att] });
       } catch (e) {
-        if (e.status === 429) {
-          const retryAfter = (e.headers?.get?.('retry-after') ?? 2);
-          lastUpdate = Date.now() + Number(retryAfter) * 1000;
+        if (e.code === 10008 || e.message?.includes('Unknown Message')) {
+          console.log(`[countdown] メッセージが削除されたため停止: ${countdownKey}`);
+          clearInterval(state.interval);
+          client.activeCountdowns.delete(countdownKey);
+        } else if (e.status === 429) {
+          const retryAfter = Number(e.headers?.get?.('retry-after') ?? 2);
+          lastUpdate = Date.now() + retryAfter * 1000;
         } else {
-          console.error('[countdown] メッセージの更新に失敗:', e.message);
+          console.error('[countdown] 更新失敗:', e.message);
         }
       } finally {
         isUpdating = false;

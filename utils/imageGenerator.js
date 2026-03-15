@@ -3,8 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const fetch = require('node-fetch');
 
-const WIDTH = 820;
-const HEIGHT = 320;
+const WIDTH = 900;
+const HEIGHT = 340;
 
 const FONT_DIR = path.join(__dirname, '../fonts');
 const FONT_PATH = path.join(FONT_DIR, 'NotoSans-Bold.ttf');
@@ -16,7 +16,6 @@ async function loadFonts() {
   if (fontsLoaded) return;
   try {
     if (!fs.existsSync(FONT_DIR)) fs.mkdirSync(FONT_DIR, { recursive: true });
-
     if (!fs.existsSync(FONT_PATH)) {
       const res = await fetch(
         'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Bold.ttf'
@@ -29,7 +28,6 @@ async function loadFonts() {
       );
       fs.writeFileSync(MONO_PATH, Buffer.from(await res.arrayBuffer()));
     }
-
     GlobalFonts.registerFromPath(FONT_PATH, 'NotoSans');
     GlobalFonts.registerFromPath(MONO_PATH, 'NotoMono');
     fontsLoaded = true;
@@ -39,318 +37,344 @@ async function loadFonts() {
 }
 
 const DESIGN_NAMES = [
-  'minimal_dark',
-  'neon_cyber',
-  'sunset',
-  'space',
-  'matrix',
-  'ocean',
-  'fire',
-  'aurora',
-  'retro',
-  'minimal_light',
+  'minimal_dark', 'neon_cyber', 'sunset', 'space', 'matrix',
+  'ocean', 'fire', 'aurora', 'retro', 'minimal_light',
 ];
 
 const DESIGN_LABELS = [
-  'Minimal Dark',
-  'Neon Cyber',
-  'Sunset',
-  'Space',
-  'Matrix',
-  'Ocean',
-  'Fire',
-  'Aurora',
-  'Retro',
-  'Minimal Light',
+  'Minimal Dark', 'Neon Cyber', 'Sunset', 'Space', 'Matrix',
+  'Ocean', 'Fire', 'Aurora', 'Retro', 'Minimal Light',
 ];
 
-function pad(n) {
-  return String(n).padStart(2, '0');
+function pad(n, len = 2) {
+  return String(n).padStart(len, '0');
 }
 
-function parseTime(totalSeconds) {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  return { h, m, s, str: `${pad(h)}:${pad(m)}:${pad(s)}` };
+function formatTime(totalSeconds) {
+  const sec = totalSeconds % 60;
+  const min = Math.floor(totalSeconds / 60) % 60;
+  const hr = Math.floor(totalSeconds / 3600) % 24;
+  const day = Math.floor(totalSeconds / 86400);
+
+  if (day > 0) {
+    return {
+      parts: [
+        { value: String(day), label: '日' },
+        { value: pad(hr), label: '時間' },
+        { value: pad(min), label: '分' },
+        { value: pad(sec), label: '秒' },
+      ],
+      colonStr: `${day}:${pad(hr)}:${pad(min)}:${pad(sec)}`,
+    };
+  }
+  if (hr > 0) {
+    return {
+      parts: [
+        { value: pad(hr), label: '時間' },
+        { value: pad(min), label: '分' },
+        { value: pad(sec), label: '秒' },
+      ],
+      colonStr: `${pad(hr)}:${pad(min)}:${pad(sec)}`,
+    };
+  }
+  return {
+    parts: [
+      { value: pad(min), label: '分' },
+      { value: pad(sec), label: '秒' },
+    ],
+    colonStr: `${pad(min)}:${pad(sec)}`,
+  };
 }
 
 function mulberry32(seed) {
   let s = seed;
   return () => {
-    s |= 0;
-    s = (s + 0x6d2b79f5) | 0;
+    s |= 0; s = (s + 0x6d2b79f5) | 0;
     let t = Math.imul(s ^ (s >>> 15), 1 | s);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-async function generateCountdownImage(remainingSeconds, targetTimeStr, designIndex = 0) {
+async function generateCountdownImage(remainingSeconds, targetLabel, designIndex = 0) {
   await loadFonts();
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');
-  const time = parseTime(Math.max(0, remainingSeconds));
+  const remaining = Math.max(0, remainingSeconds);
+  const finished = remaining === 0;
   const design = DESIGN_NAMES[designIndex % DESIGN_NAMES.length];
-  const finished = remainingSeconds <= 0;
 
   drawBackground(ctx, design);
-  drawContent(ctx, design, time, targetTimeStr, finished);
+  drawContent(ctx, design, remaining, targetLabel, finished, designIndex);
 
   return canvas.toBuffer('image/png');
 }
 
 function drawBackground(ctx, design) {
-  switch (design) {
-    case 'minimal_dark': {
-      ctx.fillStyle = '#111111';
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      const grad = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
-      grad.addColorStop(0, 'rgba(255,255,255,0.08)');
-      grad.addColorStop(1, 'rgba(255,255,255,0.02)');
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(12, 12, WIDTH - 24, HEIGHT - 24);
-      break;
-    }
+  const W = WIDTH, H = HEIGHT;
 
-    case 'neon_cyber': {
-      ctx.fillStyle = '#03040e';
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      ctx.strokeStyle = 'rgba(0,255,255,0.07)';
+  const fills = {
+    minimal_dark: () => {
+      ctx.fillStyle = '#0e0e0e';
+      ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.lineWidth = 1;
-      for (let x = 0; x <= WIDTH; x += 40) {
+      for (let x = 0; x < W; x += 60) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+      for (let y = 0; y < H; y += 60) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+      const g = ctx.createLinearGradient(0,0,W,0);
+      g.addColorStop(0,'rgba(255,255,255,0.15)'); g.addColorStop(1,'rgba(255,255,255,0.05)');
+      ctx.strokeStyle = g; ctx.lineWidth = 2;
+      ctx.strokeRect(10,10,W-20,H-20);
+    },
+    neon_cyber: () => {
+      ctx.fillStyle = '#020610'; ctx.fillRect(0,0,W,H);
+      ctx.strokeStyle = 'rgba(0,255,255,0.05)'; ctx.lineWidth = 1;
+      for (let x = 0; x < W; x += 45) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+      for (let y = 0; y < H; y += 45) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+      ['rgba(0,255,255,0.7)','rgba(255,0,200,0.7)'].forEach((c,i) => {
+        ctx.shadowColor = c; ctx.shadowBlur = 20;
+        ctx.strokeStyle = c; ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, HEIGHT);
+        if (i === 0) { ctx.moveTo(0,0); ctx.lineTo(W,0); ctx.moveTo(0,H); ctx.lineTo(W,H); }
+        else { ctx.moveTo(0,0); ctx.lineTo(0,H); ctx.moveTo(W,0); ctx.lineTo(W,H); }
         ctx.stroke();
-      }
-      for (let y = 0; y <= HEIGHT; y += 40) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(WIDTH, y);
-        ctx.stroke();
-      }
-      const glow1 = ctx.createLinearGradient(0, 0, WIDTH, 0);
-      glow1.addColorStop(0, 'rgba(0,255,255,0.4)');
-      glow1.addColorStop(0.5, 'rgba(255,0,255,0.4)');
-      glow1.addColorStop(1, 'rgba(0,255,255,0.4)');
-      ctx.strokeStyle = glow1;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(8, 8, WIDTH - 16, HEIGHT - 16);
-      break;
-    }
-
-    case 'sunset': {
-      const grad = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
-      grad.addColorStop(0, '#c0392b');
-      grad.addColorStop(0.4, '#e67e22');
-      grad.addColorStop(0.8, '#f39c12');
-      grad.addColorStop(1, '#f1c40f');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.fillRect(0, HEIGHT * 0.65, WIDTH, HEIGHT * 0.35);
-      break;
-    }
-
-    case 'space': {
-      const bg = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, 0, WIDTH / 2, HEIGHT / 2, WIDTH * 0.7);
-      bg.addColorStop(0, '#0d1b3e');
-      bg.addColorStop(1, '#020408');
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      const rand = mulberry32(42);
-      for (let i = 0; i < 200; i++) {
-        const x = rand() * WIDTH;
-        const y = rand() * HEIGHT;
-        const r = rand() * 1.8;
-        const a = 0.4 + rand() * 0.6;
-        ctx.fillStyle = `rgba(255,255,255,${a})`;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      break;
-    }
-
-    case 'matrix': {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      const rand = mulberry32(99);
-      const chars = '01アイウエオカキクケコ';
-      ctx.font = '12px monospace';
-      ctx.fillStyle = 'rgba(0,255,0,0.12)';
-      for (let i = 0; i < 60; i++) {
-        const x = rand() * WIDTH;
-        const y = rand() * HEIGHT;
-        ctx.fillText(chars[Math.floor(rand() * chars.length)], x, y);
-      }
-      ctx.strokeStyle = 'rgba(0,255,0,0.25)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(10, 10, WIDTH - 20, HEIGHT - 20);
-      break;
-    }
-
-    case 'ocean': {
-      const grad = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-      grad.addColorStop(0, '#0a1628');
-      grad.addColorStop(0.5, '#0d3b6e');
-      grad.addColorStop(1, '#1565c0');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      for (let w = 0; w < 4; w++) {
-        ctx.beginPath();
-        ctx.strokeStyle = `rgba(255,255,255,${0.05 + w * 0.03})`;
-        ctx.lineWidth = 1.5;
-        for (let x = 0; x <= WIDTH; x += 4) {
-          const y = HEIGHT * 0.55 + w * 22 + Math.sin(x * 0.025 + w * 1.2) * 14;
-          x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-      }
-      break;
-    }
-
-    case 'fire': {
-      const grad = ctx.createLinearGradient(0, HEIGHT, 0, 0);
-      grad.addColorStop(0, '#1a0000');
-      grad.addColorStop(0.25, '#7f0000');
-      grad.addColorStop(0.55, '#e84118');
-      grad.addColorStop(0.8, '#e1b12c');
-      grad.addColorStop(1, '#ffeaa7');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      break;
-    }
-
-    case 'aurora': {
-      const grad = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
-      grad.addColorStop(0, '#050820');
-      grad.addColorStop(0.5, '#0d1f3c');
-      grad.addColorStop(1, '#061a0a');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-      [[0, '#00ffaa', 60], [1, '#7f00ff', 90], [2, '#00cfff', 40]].forEach(
-        ([i, color, alpha]) => {
-          const band = ctx.createLinearGradient(0, 80 + i * 30, 0, 200 + i * 30);
-          band.addColorStop(0, `${color}00`);
-          band.addColorStop(0.5, `${color}${alpha.toString(16).padStart(2, '0')}`);
-          band.addColorStop(1, `${color}00`);
-          ctx.fillStyle = band;
-          ctx.beginPath();
-          ctx.moveTo(0, 90 + i * 25);
-          for (let x = 0; x <= WIDTH; x += 5) {
-            ctx.lineTo(x, 90 + i * 25 + Math.sin(x * 0.012 + i * 2) * 35);
-          }
-          ctx.lineTo(WIDTH, 220);
-          ctx.lineTo(0, 220);
-          ctx.closePath();
-          ctx.fill();
-        }
-      );
-      break;
-    }
-
-    case 'retro': {
-      ctx.fillStyle = '#1a0a2e';
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      for (let y = 0; y < HEIGHT; y += 4) {
-        ctx.fillStyle = 'rgba(0,0,0,0.18)';
-        ctx.fillRect(0, y, WIDTH, 2);
-      }
-      ctx.strokeStyle = '#ff00ff';
-      ctx.lineWidth = 3;
-      ctx.shadowColor = '#ff00ff';
-      ctx.shadowBlur = 12;
-      ctx.strokeRect(10, 10, WIDTH - 20, HEIGHT - 20);
+      });
       ctx.shadowBlur = 0;
-      break;
-    }
+      const corner = (x, y, dx, dy) => {
+        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x+dx*25,y); ctx.lineTo(x,y); ctx.lineTo(x,y+dy*25); ctx.stroke();
+      };
+      corner(8,8,1,1); corner(W-8,8,-1,1); corner(8,H-8,1,-1); corner(W-8,H-8,-1,-1);
+    },
+    sunset: () => {
+      const g = ctx.createLinearGradient(0,0,0,H);
+      g.addColorStop(0,'#1a0533'); g.addColorStop(0.4,'#8b1a4a'); g.addColorStop(0.75,'#e05c2a'); g.addColorStop(1,'#f5a623');
+      ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+      const rand = mulberry32(7);
+      for (let i = 0; i < 80; i++) {
+        const sx = rand()*W, sy = rand()*H*0.6, sr = rand()*1.5;
+        ctx.fillStyle = `rgba(255,255,255,${0.3+rand()*0.6})`;
+        ctx.beginPath(); ctx.arc(sx,sy,sr,0,Math.PI*2); ctx.fill();
+      }
+      for (let w = 0; w < 3; w++) {
+        const wg = ctx.createLinearGradient(0,H*0.7+w*20,0,H*0.9+w*20);
+        wg.addColorStop(0,'rgba(255,100,50,0)'); wg.addColorStop(0.5,`rgba(255,120,60,0.12)`); wg.addColorStop(1,'rgba(255,100,50,0)');
+        ctx.fillStyle = wg;
+        ctx.beginPath(); ctx.moveTo(0,H*0.72+w*18);
+        for (let x = 0; x <= W; x+=5) ctx.lineTo(x, H*0.72+w*18+Math.sin(x*0.02+w)*10);
+        ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+      }
+    },
+    space: () => {
+      const bg = ctx.createRadialGradient(W*0.3,H*0.4,0,W*0.5,H*0.5,W*0.8);
+      bg.addColorStop(0,'#0f1e4a'); bg.addColorStop(0.5,'#070d2a'); bg.addColorStop(1,'#010208');
+      ctx.fillStyle = bg; ctx.fillRect(0,0,W,H);
+      const rand = mulberry32(42);
+      for (let i = 0; i < 250; i++) {
+        const sx = rand()*W, sy = rand()*H, sr = rand()*2, a = 0.3+rand()*0.7;
+        const hue = rand() > 0.85 ? [210+rand()*40, 0.8] : [0, 0];
+        if (hue[1] > 0) ctx.fillStyle = `hsla(${hue[0]},80%,90%,${a})`;
+        else ctx.fillStyle = `rgba(255,255,255,${a})`;
+        ctx.beginPath(); ctx.arc(sx,sy,sr,0,Math.PI*2); ctx.fill();
+      }
+      const nebula = ctx.createRadialGradient(W*0.7,H*0.3,0,W*0.7,H*0.3,200);
+      nebula.addColorStop(0,'rgba(80,40,180,0.2)'); nebula.addColorStop(1,'transparent');
+      ctx.fillStyle = nebula; ctx.fillRect(0,0,W,H);
+    },
+    matrix: () => {
+      ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,H);
+      const rand = mulberry32(99);
+      const chars = '01アイウエオカキクケコサシスセソタチツテト';
+      ctx.fillStyle = 'rgba(0,255,0,0.07)'; ctx.font = '13px monospace';
+      for (let i = 0; i < 120; i++) ctx.fillText(chars[Math.floor(rand()*chars.length)], rand()*W, rand()*H);
+      ctx.fillStyle = 'rgba(0,255,0,0.04)'; ctx.font = '9px monospace';
+      for (let i = 0; i < 200; i++) ctx.fillText(chars[Math.floor(rand()*chars.length)], rand()*W, rand()*H);
+      ctx.strokeStyle = 'rgba(0,255,0,0.3)'; ctx.lineWidth = 1;
+      ctx.strokeRect(8,8,W-16,H-16);
+      ctx.strokeStyle = 'rgba(0,255,0,0.12)'; ctx.lineWidth = 1;
+      ctx.strokeRect(14,14,W-28,H-28);
+    },
+    ocean: () => {
+      const g = ctx.createLinearGradient(0,0,0,H);
+      g.addColorStop(0,'#04111f'); g.addColorStop(0.6,'#0a3060'); g.addColorStop(1,'#0d5a9e');
+      ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+      const rand = mulberry32(5);
+      for (let i = 0; i < 60; i++) {
+        const bx = rand()*W, by = rand()*H*0.7, br = rand()*1.2;
+        ctx.fillStyle = `rgba(180,230,255,${0.15+rand()*0.3})`;
+        ctx.beginPath(); ctx.arc(bx,by,br,0,Math.PI*2); ctx.fill();
+      }
+      for (let w = 0; w < 5; w++) {
+        const alpha = 0.06+w*0.04;
+        ctx.beginPath(); ctx.strokeStyle = `rgba(100,200,255,${alpha})`; ctx.lineWidth = 2;
+        for (let x = 0; x <= W; x+=4) {
+          const y = H*0.5+w*24+Math.sin(x*0.018+w*0.8)*18+Math.sin(x*0.008+w)*10;
+          x===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+      }
+    },
+    fire: () => {
+      const g = ctx.createLinearGradient(0,H,0,0);
+      g.addColorStop(0,'#0a0000'); g.addColorStop(0.2,'#5c0000'); g.addColorStop(0.5,'#c0392b');
+      g.addColorStop(0.75,'#e67e22'); g.addColorStop(0.9,'#f1c40f'); g.addColorStop(1,'#fffde7');
+      ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+      const rand = mulberry32(13);
+      for (let i = 0; i < 30; i++) {
+        const fx = rand()*W, fy = H*0.3+rand()*H*0.4;
+        const fr = 3+rand()*8;
+        const fg = ctx.createRadialGradient(fx,fy,0,fx,fy,fr);
+        fg.addColorStop(0,'rgba(255,255,200,0.4)'); fg.addColorStop(1,'transparent');
+        ctx.fillStyle = fg; ctx.fillRect(fx-fr,fy-fr,fr*2,fr*2);
+      }
+    },
+    aurora: () => {
+      ctx.fillStyle = '#030d18'; ctx.fillRect(0,0,W,H);
+      const rand = mulberry32(22);
+      for (let i = 0; i < 100; i++) {
+        ctx.fillStyle = `rgba(255,255,255,${0.2+rand()*0.5})`;
+        ctx.beginPath(); ctx.arc(rand()*W,rand()*H,rand(),0,Math.PI*2); ctx.fill();
+      }
+      const bands = [
+        { color: '#00ff88', alpha: 55, oy: 60, amp: 40 },
+        { color: '#00cfff', alpha: 45, oy: 100, amp: 50 },
+        { color: '#9b59b6', alpha: 35, oy: 140, amp: 35 },
+      ];
+      bands.forEach(({ color, alpha, oy, amp }, i) => {
+        const bg = ctx.createLinearGradient(0, oy-amp, 0, oy+amp+60);
+        bg.addColorStop(0, `${color}00`);
+        bg.addColorStop(0.4, `${color}${alpha.toString(16).padStart(2,'0')}`);
+        bg.addColorStop(1, `${color}00`);
+        ctx.fillStyle = bg;
+        ctx.beginPath(); ctx.moveTo(0, oy);
+        for (let x = 0; x <= W; x+=4) ctx.lineTo(x, oy+Math.sin(x*0.01+i*1.5)*amp);
+        ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+      });
+    },
+    retro: () => {
+      const g = ctx.createLinearGradient(0,0,W,H);
+      g.addColorStop(0,'#12002a'); g.addColorStop(1,'#000820');
+      ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+      ctx.strokeStyle = 'rgba(255,0,255,0.08)'; ctx.lineWidth = 1;
+      for (let x = 0; x < W; x+=30) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+      for (let y = 0; y < H; y+=30) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+      for (let i = 0; i < 4; i++) {
+        const c = i%2===0 ? '#ff00ff' : '#00ffff';
+        ctx.shadowColor = c; ctx.shadowBlur = 15-i*3;
+        ctx.strokeStyle = c; ctx.lineWidth = 2-i*0.3;
+        ctx.strokeRect(8+i*4, 8+i*4, W-16-i*8, H-16-i*8);
+      }
+      ctx.shadowBlur = 0;
+      for (let y = 0; y < H; y+=3) {
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.fillRect(0,y,W,1.5);
+      }
+    },
+    minimal_light: () => {
+      ctx.fillStyle = '#f5f5f7'; ctx.fillRect(0,0,W,H);
+      const accent = ctx.createLinearGradient(0,0,W,0);
+      accent.addColorStop(0,'#5e5ce6'); accent.addColorStop(0.5,'#bf5af2'); accent.addColorStop(1,'#32d74b');
+      ctx.fillStyle = accent; ctx.fillRect(0,0,W,5);
+      ctx.fillStyle = 'rgba(0,0,0,0.04)'; ctx.fillRect(0,H-5,W,5);
+      ctx.strokeStyle = '#e0e0e5'; ctx.lineWidth = 1;
+      ctx.strokeRect(18,18,W-36,H-36);
+      const rand = mulberry32(33);
+      for (let i = 0; i < 5; i++) {
+        const cx = rand()*W, cy = rand()*H, cr = 40+rand()*80;
+        ctx.strokeStyle = `rgba(94,92,230,${0.03+rand()*0.04})`; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(cx,cy,cr,0,Math.PI*2); ctx.stroke();
+      }
+    },
+  };
 
-    case 'minimal_light': {
-      ctx.fillStyle = '#f9f9fb';
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      const accent = ctx.createLinearGradient(0, 0, WIDTH, 0);
-      accent.addColorStop(0, '#6c63ff');
-      accent.addColorStop(1, '#48cae4');
-      ctx.fillStyle = accent;
-      ctx.fillRect(0, 0, WIDTH, 6);
-      ctx.strokeStyle = '#e0e0e0';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(20, 20, WIDTH - 40, HEIGHT - 40);
-      break;
-    }
-
-    default:
-      ctx.fillStyle = '#111';
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  }
+  (fills[design] || fills.minimal_dark)();
 }
 
-function drawContent(ctx, design, time, targetTimeStr, finished) {
+function drawContent(ctx, design, remaining, targetLabel, finished, designIndex) {
   const colors = getDesignColors(design);
-  const fontFamily = fontsLoaded ? 'NotoSans' : 'sans-serif';
-  const monoFamily = fontsLoaded ? 'NotoMono' : 'monospace';
+  const mono = fontsLoaded ? 'NotoMono' : 'monospace';
+  const sans = fontsLoaded ? 'NotoSans' : 'sans-serif';
 
   ctx.textAlign = 'center';
   ctx.shadowBlur = 0;
 
-  ctx.font = `18px "${fontFamily}"`;
+  ctx.font = `bold 15px "${sans}"`;
   ctx.fillStyle = colors.secondary;
-  ctx.fillText('⏰  COUNTDOWN', WIDTH / 2, 52);
-
-  if (colors.glow) {
-    ctx.shadowColor = colors.primary;
-    ctx.shadowBlur = 24;
-  }
+  ctx.fillText('⏰  COUNTDOWN TIMER', WIDTH / 2, 44);
 
   if (finished) {
-    ctx.font = `bold 72px "${fontFamily}"`;
+    if (colors.glow) { ctx.shadowColor = colors.primary; ctx.shadowBlur = 30; }
+    ctx.font = `bold 64px "${sans}"`;
     ctx.fillStyle = colors.primary;
-    ctx.fillText('🎉  時間になりました！', WIDTH / 2, 185);
+    ctx.fillText('🎉  時間になりました！', WIDTH / 2, 195);
+    ctx.shadowBlur = 0;
   } else {
-    ctx.font = `bold 108px "${monoFamily}"`;
-    ctx.fillStyle = colors.primary;
-    ctx.fillText(time.str, WIDTH / 2, 196);
+    const { parts, colonStr } = formatTime(remaining);
+    const segW = WIDTH / (parts.length + 0.5);
+    const startX = WIDTH / 2 - segW * (parts.length - 1) / 2;
+
+    const maxLen = Math.max(...parts.map(p => p.value.length));
+    const fontSize = maxLen <= 2 ? 100 : maxLen <= 4 ? 80 : maxLen <= 6 ? 64 : 52;
+
+    if (colors.glow) { ctx.shadowColor = colors.primary; ctx.shadowBlur = 28; }
+
+    parts.forEach((p, i) => {
+      const x = startX + i * segW;
+      ctx.font = `bold ${fontSize}px "${mono}"`;
+      ctx.fillStyle = colors.primary;
+      ctx.fillText(p.value, x, 192);
+
+      ctx.shadowBlur = 0;
+      ctx.font = `13px "${sans}"`;
+      ctx.fillStyle = colors.tertiary;
+      ctx.fillText(p.label, x, 218);
+      if (colors.glow) { ctx.shadowColor = colors.primary; ctx.shadowBlur = 28; }
+    });
+
+    if (parts.length > 1) {
+      ctx.shadowBlur = 0;
+      ctx.font = `bold ${fontSize}px "${mono}"`;
+      ctx.fillStyle = colors.secondary;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const x = startX + i * segW + segW * 0.5;
+        ctx.fillText(':', x, 188);
+      }
+    }
+
+    ctx.shadowBlur = 0;
   }
 
-  ctx.shadowBlur = 0;
-
-  ctx.font = `16px "${fontFamily}"`;
+  ctx.font = `14px "${sans}"`;
   ctx.fillStyle = colors.tertiary;
-  ctx.fillText(`目標時刻  ${targetTimeStr}`, WIDTH / 2, 242);
+  ctx.fillText(`目標  ${targetLabel}`, WIDTH / 2, 264);
 
-  if (!finished) {
-    ctx.font = `13px "${fontFamily}"`;
-    ctx.fillStyle = colors.tertiary;
-    const cx = WIDTH / 2;
-    ctx.fillText('時間', cx - 208, 216);
-    ctx.fillText('分', cx, 216);
-    ctx.fillText('秒', cx + 208, 216);
-  }
-
-  ctx.font = `12px "${fontFamily}"`;
+  ctx.font = `12px "${sans}"`;
   ctx.fillStyle = colors.tertiary;
   ctx.textAlign = 'right';
-  ctx.fillText(DESIGN_LABELS[DESIGN_NAMES.indexOf(design)] ?? design, WIDTH - 20, HEIGHT - 14);
+  ctx.fillText(DESIGN_LABELS[designIndex] ?? design, WIDTH - 18, HEIGHT - 12);
+
+  const now = new Date();
+  const timeNow = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  ctx.textAlign = 'left';
+  ctx.fillText(timeNow, 18, HEIGHT - 12);
 }
 
+function pad(n) { return String(n).padStart(2, '0'); }
+
 function getDesignColors(design) {
-  const map = {
-    minimal_dark: { primary: '#ffffff', secondary: '#aaaaaa', tertiary: '#666666', glow: false },
-    neon_cyber: { primary: '#00ffff', secondary: '#ff00ff', tertiary: '#00ff88', glow: true },
-    sunset: { primary: '#ffffff', secondary: 'rgba(255,255,255,0.85)', tertiary: 'rgba(255,255,255,0.6)', glow: false },
-    space: { primary: '#d4d8ff', secondary: '#8899cc', tertiary: '#5566aa', glow: true },
-    matrix: { primary: '#00ff41', secondary: '#00bb30', tertiary: '#007720', glow: true },
-    ocean: { primary: '#ffffff', secondary: '#90d5f0', tertiary: '#5bb0d4', glow: false },
-    fire: { primary: '#ffffff', secondary: '#ffd580', tertiary: '#ffaa44', glow: true },
-    aurora: { primary: '#ffffff', secondary: '#00ff96', tertiary: '#00cfff', glow: true },
-    retro: { primary: '#ffff00', secondary: '#ff88ff', tertiary: '#00eeff', glow: true },
-    minimal_light: { primary: '#212121', secondary: '#555555', tertiary: '#9e9e9e', glow: false },
+  const m = {
+    minimal_dark:  { primary: '#f0f0f0', secondary: '#888',     tertiary: '#555',     glow: false },
+    neon_cyber:    { primary: '#00ffee', secondary: '#ff00cc',  tertiary: '#00ff88',  glow: true  },
+    sunset:        { primary: '#fff',    secondary: 'rgba(255,255,255,0.8)', tertiary: 'rgba(255,220,180,0.7)', glow: false },
+    space:         { primary: '#c8d8ff', secondary: '#7090cc',  tertiary: '#4a6090',  glow: true  },
+    matrix:        { primary: '#00ff41', secondary: '#00cc33',  tertiary: '#008822',  glow: true  },
+    ocean:         { primary: '#e8f8ff', secondary: '#80d0f0',  tertiary: '#4aa8cc',  glow: false },
+    fire:          { primary: '#fff8e1', secondary: '#ffcc44',  tertiary: '#ff9933',  glow: true  },
+    aurora:        { primary: '#ffffff', secondary: '#00ff88',  tertiary: '#00cfff',  glow: true  },
+    retro:         { primary: '#ffff00', secondary: '#ff88ff',  tertiary: '#00eeff',  glow: true  },
+    minimal_light: { primary: '#1c1c1e', secondary: '#48484a',  tertiary: '#8e8e93',  glow: false },
   };
-  return map[design] ?? map.minimal_dark;
+  return m[design] ?? m.minimal_dark;
 }
 
 module.exports = { generateCountdownImage, DESIGN_NAMES, DESIGN_LABELS };
