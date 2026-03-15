@@ -35,7 +35,7 @@ client.on('messageDelete', (message) => {
     if (state.messageId === message.id) {
       clearInterval(state.interval);
       client.activeCountdowns.delete(key);
-      console.log(`[countdown] メッセージ削除によりカウントダウン停止: ${key}`);
+      console.log(`[countdown] 削除により停止: ${key}`);
       break;
     }
   }
@@ -48,12 +48,26 @@ client.on('interactionCreate', async (interaction) => {
   try {
     await command.execute(interaction, client);
   } catch (error) {
-    console.error(error);
+    console.error('[interactionCreate] エラー:', error.message);
     const msg = { content: 'コマンドの実行中にエラーが発生しました。', flags: 64 };
-    interaction.replied || interaction.deferred
-      ? await interaction.followUp(msg)
-      : await interaction.reply(msg);
+    try {
+      if (interaction.deferred) {
+        await interaction.editReply(msg);
+      } else if (!interaction.replied) {
+        await interaction.reply(msg);
+      }
+    } catch (e) {
+      console.error('[interactionCreate] エラー応答の送信に失敗:', e.message);
+    }
   }
+});
+
+client.on('error', (error) => {
+  console.error('[client error]', error.message);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('[unhandledRejection]', error?.message ?? error);
 });
 
 client.login(process.env.DISCORD_TOKEN);
