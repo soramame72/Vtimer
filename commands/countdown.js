@@ -5,7 +5,8 @@ const {
 } = require('discord.js');
 const { generateCountdownImage, DESIGN_LABELS } = require('../utils/imageGenerator');
 
-const UPDATE_INTERVAL_MS = 10_000;
+const UPDATE_INTERVAL_MS = 1_000;
+const RATE_LIMIT_MS = 1_500;
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -78,31 +79,51 @@ module.exports = {
 
     const imageBuffer = await generateCountdownImage(getRemainingSeconds(), timeStr, designIndex);
     const attachment = new AttachmentBuilder(imageBuffer, { name: 'countdown.png' });
-
     const countdownMessage = await targetChannel.send({ files: [attachment] });
 
     await interaction.editReply({
       content: `✅ <#${targetChannel.id}> でカウントダウンを開始しました！　デザイン: **${DESIGN_LABELS[designIndex]}**`,
     });
 
+    let lastUpdate = 0;
+    let isUpdating = false;
+
     async function updateCountdown() {
       const remaining = getRemainingSeconds();
+
+      if (remaining <= 0) {
+        clearInterval(state.interval);
+        client.activeCountdowns.delete(countdownKey);
+        try {
+          const buf = await generateCountdownImage(0, timeStr, designIndex);
+          const att = new AttachmentBuilder(buf, { name: 'countdown.png' });
+          await countdownMessage.edit({ files: [att] });
+        } catch {}
+        return;
+      }
+
+      const now = Date.now();
+      if (isUpdating || now - lastUpdate < RATE_LIMIT_MS) return;
+
+      isUpdating = true;
+      lastUpdate = now;
       try {
         const buf = await generateCountdownImage(remaining, timeStr, designIndex);
         const att = new AttachmentBuilder(buf, { name: 'countdown.png' });
         await countdownMessage.edit({ files: [att] });
       } catch (e) {
-        console.error('[countdown] メッセージの更新に失敗:', e.message);
-      }
-
-      if (remaining <= 0) {
-        clearInterval(state.interval);
-        client.activeCountdowns.delete(countdownKey);
+        if (e.status === 429) {
+          const retryAfter = (e.headers?.get?.('retry-after') ?? 2);
+          lastUpdate = Date.now() + Number(retryAfter) * 1000;
+        } else {
+          console.error('[countdown] メッセージの更新に失敗:', e.message);
+        }
+      } finally {
+        isUpdating = false;
       }
     }
 
     const interval = setInterval(updateCountdown, UPDATE_INTERVAL_MS);
-
     const state = { interval, messageId: countdownMessage.id, channelId: targetChannel.id };
     client.activeCountdowns.set(countdownKey, state);
   },
