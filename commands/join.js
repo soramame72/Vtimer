@@ -25,7 +25,7 @@ module.exports = {
     const guild = interaction.guild;
     const guildId = guild.id;
 
-    let voiceChannel =
+    const voiceChannel =
       interaction.options.getChannel('channel') ??
       interaction.member.voice?.channel;
 
@@ -60,6 +60,8 @@ module.exports = {
       return interaction.editReply({ content: '❌ ボイスチャンネルへの接続に失敗しました。' });
     }
 
+    const joinedAt = Date.now();
+
     connection.on(VoiceConnectionStatus.Disconnected, async () => {
       try {
         await Promise.race([
@@ -82,7 +84,12 @@ module.exports = {
       }
     }, 20_000);
 
-    client.voiceConnections.set(guildId, { connection, keepInterval, channelId: voiceChannel.id });
+    client.voiceConnections.set(guildId, {
+      connection,
+      keepInterval,
+      channelId: voiceChannel.id,
+      joinedAt,
+    });
 
     await interaction.editReply({
       content: `✅ **${voiceChannel.name}** に接続しました。\`/leave\` コマンドで退出します。`,

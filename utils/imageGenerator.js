@@ -4,7 +4,7 @@ const path = require('path');
 const fetch = require('node-fetch');
 
 const W = 900;
-const H = 340;
+const H = 360;
 
 const FONT_DIR = path.join(__dirname, '../fonts');
 const MONO_PATH = path.join(FONT_DIR, 'mono.ttf');
@@ -12,7 +12,7 @@ const SANS_PATH = path.join(FONT_DIR, 'sans.ttf');
 
 let fontsLoaded = false;
 
-async function loadFonts() {
+async function preloadFonts() {
   if (fontsLoaded) return;
   try {
     if (!fs.existsSync(FONT_DIR)) fs.mkdirSync(FONT_DIR, { recursive: true });
@@ -63,7 +63,6 @@ function formatTime(totalSec) {
   const s = totalSec % 60;
   const m = Math.floor(totalSec / 60) % 60;
   const h = Math.floor(totalSec / 3600);
-
   if (h > 0) {
     return [
       { value: String(h), label: 'HRS' },
@@ -87,8 +86,8 @@ function mulberry32(seed) {
   };
 }
 
-async function generateCountdownImage(remainingSeconds, targetLabel, designIndex = 0) {
-  await loadFonts();
+async function generateCountdownImage(remainingSeconds, targetLabel, designIndex = 0, vcName = '') {
+  if (!fontsLoaded) await preloadFonts();
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   const remaining = Math.max(0, remainingSeconds);
@@ -96,7 +95,7 @@ async function generateCountdownImage(remainingSeconds, targetLabel, designIndex
   const design = DESIGN_NAMES[designIndex % DESIGN_NAMES.length];
 
   drawBackground(ctx, design);
-  drawContent(ctx, design, remaining, targetLabel, finished, designIndex);
+  drawContent(ctx, design, remaining, targetLabel, finished, designIndex, vcName);
 
   return canvas.toBuffer('image/png');
 }
@@ -105,11 +104,10 @@ function drawBackground(ctx, design) {
   const fills = {
     minimal_dark: () => {
       ctx.fillStyle = '#0e0e0e'; ctx.fillRect(0,0,W,H);
-      ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
       for (let x = 0; x < W; x += 60) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
       for (let y = 0; y < H; y += 60) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1.5;
-      ctx.strokeRect(10,10,W-20,H-20);
+      ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1.5; ctx.strokeRect(10,10,W-20,H-20);
     },
     neon_cyber: () => {
       ctx.fillStyle = '#020610'; ctx.fillRect(0,0,W,H);
@@ -123,8 +121,7 @@ function drawBackground(ctx, design) {
         ctx.shadowBlur = 0;
       };
       corner(8,8,1,1); corner(W-8,8,-1,1); corner(8,H-8,1,-1); corner(W-8,H-8,-1,-1);
-      ctx.strokeStyle = 'rgba(255,0,200,0.3)'; ctx.lineWidth = 1;
-      ctx.strokeRect(8,8,W-16,H-16);
+      ctx.strokeStyle = 'rgba(255,0,200,0.25)'; ctx.lineWidth = 1; ctx.strokeRect(8,8,W-16,H-16);
     },
     sunset: () => {
       const g = ctx.createLinearGradient(0,0,0,H);
@@ -157,13 +154,11 @@ function drawBackground(ctx, design) {
       const chars = '01ABCDEF0110';
       ctx.font = '13px monospace';
       for (let i = 0; i < 180; i++) {
-        const a = 0.04 + rand()*0.08;
-        ctx.fillStyle = `rgba(0,255,0,${a})`;
+        ctx.fillStyle = `rgba(0,255,0,${0.04+rand()*0.08})`;
         ctx.fillText(chars[Math.floor(rand()*chars.length)], rand()*W, rand()*H);
       }
       ctx.shadowColor = '#00ff00'; ctx.shadowBlur = 8;
-      ctx.strokeStyle = 'rgba(0,255,0,0.5)'; ctx.lineWidth = 1.5;
-      ctx.strokeRect(8,8,W-16,H-16);
+      ctx.strokeStyle = 'rgba(0,255,0,0.5)'; ctx.lineWidth = 1.5; ctx.strokeRect(8,8,W-16,H-16);
       ctx.shadowBlur = 0;
     },
     ocean: () => {
@@ -192,17 +187,13 @@ function drawBackground(ctx, design) {
         ctx.fillStyle = `rgba(255,255,255,${0.2+rand()*0.5})`;
         ctx.beginPath(); ctx.arc(rand()*W, rand()*H, rand(), 0, Math.PI*2); ctx.fill();
       }
-      [
-        ['#00ff88', 55, 65, 40],
-        ['#00cfff', 45, 105, 50],
-        ['#9b59b6', 38, 145, 35],
-      ].forEach(([color, alpha, oy, amp], i) => {
-        const bg = ctx.createLinearGradient(0, oy-amp, 0, oy+amp+60);
-        bg.addColorStop(0, `${color}00`);
-        bg.addColorStop(0.4, `${color}${alpha.toString(16).padStart(2,'0')}`);
-        bg.addColorStop(1, `${color}00`);
+      [['#00ff88',55,65,40],['#00cfff',45,105,50],['#9b59b6',38,145,35]].forEach(([color,alpha,oy,amp],i) => {
+        const bg = ctx.createLinearGradient(0,oy-amp,0,oy+amp+60);
+        bg.addColorStop(0,`${color}00`);
+        bg.addColorStop(0.4,`${color}${alpha.toString(16).padStart(2,'0')}`);
+        bg.addColorStop(1,`${color}00`);
         ctx.fillStyle = bg;
-        ctx.beginPath(); ctx.moveTo(0, oy);
+        ctx.beginPath(); ctx.moveTo(0,oy);
         for (let x = 0; x <= W; x+=4) ctx.lineTo(x, oy+Math.sin(x*0.01+i*1.5)*amp);
         ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
       });
@@ -239,7 +230,7 @@ function drawBackground(ctx, design) {
   (fills[design] || fills.minimal_dark)();
 }
 
-function drawContent(ctx, design, remaining, targetLabel, finished, designIndex) {
+function drawContent(ctx, design, remaining, targetLabel, finished, designIndex, vcName) {
   const c = getDesignColors(design);
   const mono = fontsLoaded ? 'BotMono' : 'monospace';
   const sans = fontsLoaded ? 'BotSans' : 'sans-serif';
@@ -247,75 +238,82 @@ function drawContent(ctx, design, remaining, targetLabel, finished, designIndex)
   ctx.textAlign = 'center';
   ctx.shadowBlur = 0;
 
-  ctx.font = `bold 14px "${sans}"`;
-  ctx.fillStyle = c.secondary;
-  ctx.fillText('COUNTDOWN TIMER', W/2, 42);
+  const headerY = 38;
+  if (vcName) {
+    ctx.font = `bold 13px "${sans}"`;
+    ctx.fillStyle = c.secondary;
+    const label = vcName.length > 30 ? vcName.slice(0, 30) + '...' : vcName;
+    ctx.fillText(`VOICE CHANNEL  #  ${label}`, W/2, headerY);
+  } else {
+    ctx.font = `bold 13px "${sans}"`;
+    ctx.fillStyle = c.secondary;
+    ctx.fillText('COUNTDOWN TIMER', W/2, headerY);
+  }
+
+  ctx.font = `11px "${sans}"`;
+  ctx.fillStyle = c.tertiary;
+  ctx.fillText(`TARGET  ${targetLabel}`, W/2, headerY + 20);
 
   if (finished) {
     if (c.glow) { ctx.shadowColor = c.primary; ctx.shadowBlur = 30; }
-    ctx.font = `bold 68px "${sans}"`;
+    ctx.font = `bold 64px "${sans}"`;
     ctx.fillStyle = c.primary;
-    ctx.fillText("TIME'S UP!", W/2, 195);
+    ctx.fillText("TIME'S UP!", W/2, 210);
     ctx.shadowBlur = 0;
   } else {
     const parts = formatTime(remaining);
     const segW = W / parts.length;
-
     const maxValLen = Math.max(...parts.map(p => p.value.length));
-    const fontSize = maxValLen <= 2 ? 110 : maxValLen <= 4 ? 86 : maxValLen <= 6 ? 70 : maxValLen <= 8 ? 58 : 46;
+    const fontSize = maxValLen <= 2 ? 108 : maxValLen <= 4 ? 84 : maxValLen <= 6 ? 68 : maxValLen <= 8 ? 56 : 44;
 
     parts.forEach((p, i) => {
       const x = segW * i + segW / 2;
 
       if (i > 0) {
-        if (c.glow) { ctx.shadowColor = c.secondary; ctx.shadowBlur = 12; }
+        if (c.glow) { ctx.shadowColor = c.secondary; ctx.shadowBlur = 10; }
         ctx.font = `bold ${fontSize}px "${mono}"`;
         ctx.fillStyle = c.secondary;
-        ctx.fillText(':', x - segW / 2, 198);
+        ctx.fillText(':', x - segW / 2, 212);
+        ctx.shadowBlur = 0;
       }
 
       if (c.glow) { ctx.shadowColor = c.primary; ctx.shadowBlur = 26; }
       ctx.font = `bold ${fontSize}px "${mono}"`;
       ctx.fillStyle = c.primary;
-      ctx.fillText(p.value, x, 198);
+      ctx.fillText(p.value, x, 212);
       ctx.shadowBlur = 0;
 
-      ctx.font = `12px "${sans}"`;
+      ctx.font = `11px "${sans}"`;
       ctx.fillStyle = c.tertiary;
-      ctx.fillText(p.label, x, 224);
+      ctx.fillText(p.label, x, 236);
     });
   }
 
   const now = new Date();
   const nowStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
-  ctx.font = `13px "${sans}"`;
-  ctx.fillStyle = c.tertiary;
-  ctx.fillText(`TARGET  ${targetLabel}`, W/2, 265);
-
   ctx.font = `11px "${sans}"`;
-  ctx.textAlign = 'right';
   ctx.fillStyle = c.tertiary;
+  ctx.textAlign = 'right';
   ctx.fillText(DESIGN_LABELS[designIndex] ?? design, W-16, H-12);
-
   ctx.textAlign = 'left';
   ctx.fillText(nowStr, 16, H-12);
 }
 
 function getDesignColors(design) {
   const m = {
-    minimal_dark:  { primary: '#f0f0f0', secondary: '#777',     tertiary: '#444',     glow: false },
-    neon_cyber:    { primary: '#00ffee', secondary: '#ff00cc',  tertiary: '#00cc88',  glow: true  },
+    minimal_dark:  { primary: '#f0f0f0', secondary: '#777',    tertiary: '#444',    glow: false },
+    neon_cyber:    { primary: '#00ffee', secondary: '#ff00cc', tertiary: '#00cc88', glow: true  },
     sunset:        { primary: '#ffffff', secondary: 'rgba(255,255,255,0.75)', tertiary: 'rgba(255,210,160,0.7)', glow: false },
-    space:         { primary: '#c8d8ff', secondary: '#6080bb',  tertiary: '#405080',  glow: true  },
-    matrix:        { primary: '#00ff41', secondary: '#00bb2f',  tertiary: '#007720',  glow: true  },
-    ocean:         { primary: '#e8f8ff', secondary: '#70c8ee',  tertiary: '#3898bb',  glow: false },
-    fire:          { primary: '#fff8e1', secondary: '#ffcc44',  tertiary: '#ff9933',  glow: true  },
-    aurora:        { primary: '#ffffff', secondary: '#00ff88',  tertiary: '#00b8ee',  glow: true  },
-    retro:         { primary: '#ffff00', secondary: '#ff88ff',  tertiary: '#00ddff',  glow: true  },
-    minimal_light: { primary: '#1c1c1e', secondary: '#48484a',  tertiary: '#8e8e93',  glow: false },
+    space:         { primary: '#c8d8ff', secondary: '#6080bb', tertiary: '#405080', glow: true  },
+    matrix:        { primary: '#00ff41', secondary: '#00bb2f', tertiary: '#007720', glow: true  },
+    ocean:         { primary: '#e8f8ff', secondary: '#70c8ee', tertiary: '#3898bb', glow: false },
+    fire:          { primary: '#fff8e1', secondary: '#ffcc44', tertiary: '#ff9933', glow: true  },
+    aurora:        { primary: '#ffffff', secondary: '#00ff88', tertiary: '#00b8ee', glow: true  },
+    retro:         { primary: '#ffff00', secondary: '#ff88ff', tertiary: '#00ddff', glow: true  },
+    minimal_light: { primary: '#1c1c1e', secondary: '#48484a', tertiary: '#8e8e93', glow: false },
   };
   return m[design] ?? m.minimal_dark;
 }
 
-module.exports = { generateCountdownImage, DESIGN_NAMES, DESIGN_LABELS };
+module.exports = { generateCountdownImage, preloadFonts, DESIGN_NAMES, DESIGN_LABELS };
