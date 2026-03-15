@@ -73,13 +73,20 @@ module.exports = {
       });
     }
 
-    const sessionKey   = `${interaction.guildId}_${vcChannel.id}`;
-    const sessionStart = client.vcSessionStart.get(sessionKey);
+    const sessionKey = `${interaction.guildId}_${vcChannel.id}`;
+    let sessionStart = client.vcSessionStart.get(sessionKey);
 
     if (!sessionStart) {
-      return interaction.editReply({
-        content: `❌ No active session in **${vcChannel.name}**. Someone must be in the channel first.`,
-      });
+      const humans = vcChannel.members?.filter((m) => !m.user.bot);
+      if (humans?.size > 0) {
+        sessionStart = Date.now();
+        client.vcSessionStart.set(sessionKey, sessionStart);
+        console.log(`[vc] session registered on-demand: ${sessionKey}`);
+      } else {
+        return interaction.editReply({
+          content: `❌ No one is in **${vcChannel.name}** right now.`,
+        });
+      }
     }
 
     const elapsedSec = Math.round((Date.now() - sessionStart) / 1000);
