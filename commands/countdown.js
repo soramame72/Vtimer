@@ -4,6 +4,7 @@ const {
   ChannelType,
 } = require('discord.js');
 const { generateCountdownImage, DESIGN_LABELS } = require('../utils/imageGenerator');
+const { toRomaji } = require('../utils/toRomaji');
 
 const UPDATE_INTERVAL_MS = 1_000;
 const RATE_LIMIT_MS = 1_500;
@@ -30,47 +31,56 @@ module.exports = {
     .setName('countdown')
     .setDescription('Countdown until the VC duration reaches the specified time')
     .addChannelOption((o) =>
-      o
-        .setName('vc')
-        .setDescription('Target voice channel')
-        .addChannelTypes(ChannelType.GuildVoice)
-        .setRequired(true)
+      o.setName('vc').setDescription('Target voice channel')
+        .addChannelTypes(ChannelType.GuildVoice).setRequired(true)
     )
     .addStringOption((o) =>
-      o
-        .setName('time')
-        .setDescription('Target duration H:MM:SS  e.g. 1:30:00 / 495:19:19')
+      o.setName('time').setDescription('Target duration H:MM:SS  e.g. 1:30:00 / 495:19:19')
         .setRequired(true)
     )
     .addChannelOption((o) =>
-      o
-        .setName('channel')
-        .setDescription('Text channel to post the countdown')
-        .addChannelTypes(ChannelType.GuildText)
-        .setRequired(true)
+      o.setName('channel').setDescription('Text channel to post the countdown')
+        .addChannelTypes(ChannelType.GuildText).setRequired(true)
     )
     .addIntegerOption((o) =>
-      o
-        .setName('design')
+      o.setName('design')
         .setDescription('Design 1-10: 1=Dark 2=Cyber 3=Sunset 4=Space 5=Matrix 6=Ocean 7=Fire 8=Aurora 9=Retro 10=Light')
-        .setMinValue(1)
-        .setMaxValue(10)
+        .setMinValue(1).setMaxValue(10).setRequired(false)
+    )
+    .addStringOption((o) =>
+      o.setName('notify_at')
+        .setDescription('Remaining time to send a mention  e.g. 0:30:00 / 0:05:00')
+        .setRequired(false)
+    )
+    .addMentionableOption((o) =>
+      o.setName('mention')
+        .setDescription('User or role to mention when notify_at is reached')
         .setRequired(false)
     ),
 
   async execute(interaction, client) {
     await interaction.deferReply({ flags: 64 });
 
-    const vcChannel     = interaction.options.getChannel('vc');
-    const timeStr       = interaction.options.getString('time');
-    const targetChannel = interaction.options.getChannel('channel');
-    const designIndex   = (interaction.options.getInteger('design') ?? 1) - 1;
+    const vcChannel      = interaction.options.getChannel('vc');
+    const timeStr        = interaction.options.getString('time');
+    const targetChannel  = interaction.options.getChannel('channel');
+    const designIndex    = (interaction.options.getInteger('design') ?? 1) - 1;
+    const notifyAtStr    = interaction.options.getString('notify_at');
+    const mentionable    = interaction.options.getMentionable('mention');
 
     const targetTotalSec = parseHMS(timeStr);
     if (!targetTotalSec || targetTotalSec <= 0) {
       return interaction.editReply({
         content: '❌ Invalid format. Use `H:MM:SS`  e.g. `1:30:00` `495:19:19`',
       });
+    }
+
+    let notifyAtSec = null;
+    if (notifyAtStr) {
+      notifyAtSec = parseHMS(notifyAtStr);
+      if (!notifyAtSec) {
+        return interaction.editReply({ content: '❌ notify_at format invalid. Use `H:MM:SS`' });
+      }
     }
 
     const sessionKey = `${interaction.guildId}_${vcChannel.id}`;
@@ -89,11 +99,10 @@ module.exports = {
       }
     }
 
-    const elapsedSec = Math.round((Date.now() - sessionStart) / 1000);
-
-    if (elapsedSec >= targetTotalSec) {
+    const vcElapsedNow = Math.round((Date.now() - sessionStart) / 1000);
+    if (vcElapsedNow >= targetTotalSec) {
       return interaction.editReply({
-        content: `❌ **${vcChannel.name}** already exceeded the target \`${timeStr}\` (elapsed: ${toHMS(elapsedSec)}).`,
+        content: `❌ **${vcChannel.name}** already exceeded the target \`${timeStr}\` (elapsed: ${toHMS(vcElapsedNow)}).`,
       });
     }
 
@@ -109,11 +118,13 @@ module.exports = {
       client.activeCountdowns.delete(countdownKey);
     }
 
+    const vcDisplayName = toRomaji(vcChannel.name);
+
     const imageBuffer = await generateCountdownImage({
       remaining: getRemainingSeconds(),
       elapsed:   getElapsedSeconds(),
       target:    timeStr,
-      vcName:    vcChannel.name,
+      vcName:    vcDisplayName,
       designIndex,
     });
 
@@ -124,16 +135,30 @@ module.exports = {
     await interaction.editReply({
       content: [
         `✅ Countdown started in <#${targetChannel.id}>`,
-        `VC: **${vcChannel.name}**  |  Target: \`${timeStr}\`  |  Elapsed: ${toHMS(elapsedSec)}  |  Design: **${DESIGN_LABELS[designIndex]}**`,
-        `Delete the message to stop the countdown.`,
-      ].join('\n'),
+        `VC: **${vcChannel.name}**  |  Target: \`${timeStr}\`  |  Elapsed: ${toHMS(vcElapsedNow)}  |  Design: **${DESIGN_LABELS[designIndex]}**`,
+        notifyAtSec && mentionable ? `🔔 Mention at remaining: \`${notifyAtStr}\`` : '',
+        `Delete the message to stop.`,
+      ].filter(Boolean).join('\n'),
     });
 
-    let lastUpdate = 0;
-    let isUpdating = false;
+    let lastUpdate    = 0;
+    let isUpdating    = false;
+    let notified      = false;
 
     async function updateCountdown() {
       const remaining = getRemainingSeconds();
+
+      if (notifyAtSec && !notified && remaining <= notifyAtSec) {
+        notified = true;
+        try {
+          const mentionStr = mentionable?.toString() ?? '';
+          await targetChannel.send({
+            content: `${mentionStr} ⏰ **${toHMS(notifyAtSec)}** remaining in **${vcChannel.name}**!`,
+          });
+        } catch (e) {
+          console.error('[countdown] mention failed:', e.message);
+        }
+      }
 
       if (remaining <= 0) {
         clearInterval(state.interval);
@@ -143,12 +168,17 @@ module.exports = {
             remaining: 0,
             elapsed:   getElapsedSeconds(),
             target:    timeStr,
-            vcName:    vcChannel.name,
+            vcName:    vcDisplayName,
             designIndex,
           });
           await countdownMessage.edit({
             files: [new AttachmentBuilder(buf, { name: 'countdown.png' })],
           });
+          if (mentionable) {
+            await targetChannel.send({
+              content: `${mentionable.toString()} 🎉 **${vcChannel.name}** reached the target \`${timeStr}\`!`,
+            });
+          }
         } catch {}
         return;
       }
@@ -163,7 +193,7 @@ module.exports = {
           remaining,
           elapsed: getElapsedSeconds(),
           target:  timeStr,
-          vcName:  vcChannel.name,
+          vcName:  vcDisplayName,
           designIndex,
         });
         await countdownMessage.edit({
