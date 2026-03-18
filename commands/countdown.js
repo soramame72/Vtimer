@@ -35,12 +35,17 @@ module.exports = {
         .addChannelTypes(ChannelType.GuildVoice).setRequired(true)
     )
     .addStringOption((o) =>
-      o.setName('time').setDescription('Target duration H:MM:SS  e.g. 1:30:00 / 495:19:19')
+      o.setName('time').setDescription('Target duration H:MM:SS  e.g. 2:00:00')
         .setRequired(true)
     )
     .addChannelOption((o) =>
       o.setName('channel').setDescription('Text channel to post the countdown')
         .addChannelTypes(ChannelType.GuildText).setRequired(true)
+    )
+    .addStringOption((o) =>
+      o.setName('elapsed')
+        .setDescription('Current VC elapsed time H:MM:SS  e.g. 0:21:12  (required if bot was not tracking)')
+        .setRequired(false)
     )
     .addIntegerOption((o) =>
       o.setName('design')
@@ -49,30 +54,29 @@ module.exports = {
     )
     .addStringOption((o) =>
       o.setName('notify_at')
-        .setDescription('Remaining time to send a mention  e.g. 0:30:00 / 0:05:00')
+        .setDescription('Remaining time to send mention  e.g. 0:30:00')
         .setRequired(false)
     )
     .addMentionableOption((o) =>
       o.setName('mention')
-        .setDescription('User or role to mention when notify_at is reached')
+        .setDescription('User or role to mention at notify_at and on finish')
         .setRequired(false)
     ),
 
   async execute(interaction, client) {
     await interaction.deferReply({ flags: 64 });
 
-    const vcChannel      = interaction.options.getChannel('vc');
-    const timeStr        = interaction.options.getString('time');
-    const targetChannel  = interaction.options.getChannel('channel');
-    const designIndex    = (interaction.options.getInteger('design') ?? 1) - 1;
-    const notifyAtStr    = interaction.options.getString('notify_at');
-    const mentionable    = interaction.options.getMentionable('mention');
+    const vcChannel     = interaction.options.getChannel('vc');
+    const timeStr       = interaction.options.getString('time');
+    const targetChannel = interaction.options.getChannel('channel');
+    const elapsedStr    = interaction.options.getString('elapsed');
+    const designIndex   = (interaction.options.getInteger('design') ?? 1) - 1;
+    const notifyAtStr   = interaction.options.getString('notify_at');
+    const mentionable   = interaction.options.getMentionable('mention');
 
     const targetTotalSec = parseHMS(timeStr);
     if (!targetTotalSec || targetTotalSec <= 0) {
-      return interaction.editReply({
-        content: '❌ Invalid format. Use `H:MM:SS`  e.g. `1:30:00` `495:19:19`',
-      });
+      return interaction.editReply({ content: '❌ Invalid format. Use `H:MM:SS`  e.g. `2:00:00`' });
     }
 
     let notifyAtSec = null;
@@ -83,32 +87,43 @@ module.exports = {
       }
     }
 
-    const sessionKey = `${interaction.guildId}_${vcChannel.id}`;
-    let sessionStart = client.vcSessionStart.get(sessionKey);
+    let currentElapsedSec;
 
-    if (!sessionStart) {
-      const humans = vcChannel.members?.filter((m) => !m.user.bot);
-      if (humans?.size > 0) {
-        sessionStart = Date.now();
-        client.vcSessionStart.set(sessionKey, sessionStart);
-        console.log(`[vc] session registered on-demand: ${sessionKey}`);
+    if (elapsedStr) {
+      currentElapsedSec = parseHMS(elapsedStr);
+      if (currentElapsedSec === null) {
+        return interaction.editReply({ content: '❌ elapsed format invalid. Use `H:MM:SS`  e.g. `0:21:12`' });
+      }
+      const fakeStart = Date.now() - currentElapsedSec * 1000;
+      client.vcSessionStart.set(`${interaction.guildId}_${vcChannel.id}`, fakeStart);
+    } else {
+      const sessionKey = `${interaction.guildId}_${vcChannel.id}`;
+      const sessionStart = client.vcSessionStart.get(sessionKey);
+
+      if (sessionStart) {
+        currentElapsedSec = Math.round((Date.now() - sessionStart) / 1000);
       } else {
-        return interaction.editReply({
-          content: `❌ No one is in **${vcChannel.name}** right now.`,
-        });
+        const humans = vcChannel.members?.filter((m) => !m.user.bot);
+        if (humans?.size > 0) {
+          client.vcSessionStart.set(sessionKey, Date.now());
+          currentElapsedSec = 0;
+        } else {
+          return interaction.editReply({ content: `❌ No one is in **${vcChannel.name}**. If the session started before the bot, use the \`elapsed\` option.` });
+        }
       }
     }
 
-    const vcElapsedNow = Math.round((Date.now() - sessionStart) / 1000);
-    if (vcElapsedNow >= targetTotalSec) {
+    if (currentElapsedSec >= targetTotalSec) {
       return interaction.editReply({
-        content: `❌ **${vcChannel.name}** already exceeded the target \`${timeStr}\` (elapsed: ${toHMS(vcElapsedNow)}).`,
+        content: `❌ Already exceeded target \`${timeStr}\` (current elapsed: ${toHMS(currentElapsedSec)}).`,
       });
     }
 
-    const endEpoch = sessionStart + targetTotalSec * 1000;
+    const remainingAtStart = targetTotalSec - currentElapsedSec;
+    const endEpoch = Date.now() + remainingAtStart * 1000;
+
     const getRemainingSeconds = () => Math.max(0, Math.round((endEpoch - Date.now()) / 1000));
-    const getElapsedSeconds   = () => Math.round((Date.now() - sessionStart) / 1000);
+    const getElapsedSeconds   = () => targetTotalSec - getRemainingSeconds();
 
     const guildId      = interaction.guildId;
     const countdownKey = `${guildId}_${targetChannel.id}`;
@@ -135,15 +150,15 @@ module.exports = {
     await interaction.editReply({
       content: [
         `✅ Countdown started in <#${targetChannel.id}>`,
-        `VC: **${vcChannel.name}**  |  Target: \`${timeStr}\`  |  Elapsed: ${toHMS(vcElapsedNow)}  |  Design: **${DESIGN_LABELS[designIndex]}**`,
+        `VC: **${vcChannel.name}**  |  Target: \`${timeStr}\`  |  Current elapsed: ${toHMS(currentElapsedSec)}  |  Design: **${DESIGN_LABELS[designIndex]}**`,
         notifyAtSec && mentionable ? `🔔 Mention at remaining: \`${notifyAtStr}\`` : '',
         `Delete the message to stop.`,
       ].filter(Boolean).join('\n'),
     });
 
-    let lastUpdate    = 0;
-    let isUpdating    = false;
-    let notified      = false;
+    let lastUpdate = 0;
+    let isUpdating = false;
+    let notified   = false;
 
     async function updateCountdown() {
       const remaining = getRemainingSeconds();
@@ -151,9 +166,8 @@ module.exports = {
       if (notifyAtSec && !notified && remaining <= notifyAtSec) {
         notified = true;
         try {
-          const mentionStr = mentionable?.toString() ?? '';
           await targetChannel.send({
-            content: `${mentionStr} ⏰ **${toHMS(notifyAtSec)}** remaining in **${vcChannel.name}**!`,
+            content: `${mentionable} ⏰ **${toHMS(notifyAtSec)}** remaining in **${vcChannel.name}**!`,
           });
         } catch (e) {
           console.error('[countdown] mention failed:', e.message);
@@ -165,18 +179,13 @@ module.exports = {
         client.activeCountdowns.delete(countdownKey);
         try {
           const buf = await generateCountdownImage({
-            remaining: 0,
-            elapsed:   getElapsedSeconds(),
-            target:    timeStr,
-            vcName:    vcDisplayName,
-            designIndex,
+            remaining: 0, elapsed: targetTotalSec,
+            target: timeStr, vcName: vcDisplayName, designIndex,
           });
-          await countdownMessage.edit({
-            files: [new AttachmentBuilder(buf, { name: 'countdown.png' })],
-          });
+          await countdownMessage.edit({ files: [new AttachmentBuilder(buf, { name: 'countdown.png' })] });
           if (mentionable) {
             await targetChannel.send({
-              content: `${mentionable.toString()} 🎉 **${vcChannel.name}** reached the target \`${timeStr}\`!`,
+              content: `${mentionable} 🎉 **${vcChannel.name}** reached the target \`${timeStr}\`!`,
             });
           }
         } catch {}
@@ -190,15 +199,10 @@ module.exports = {
 
       try {
         const buf = await generateCountdownImage({
-          remaining,
-          elapsed: getElapsedSeconds(),
-          target:  timeStr,
-          vcName:  vcDisplayName,
-          designIndex,
+          remaining, elapsed: getElapsedSeconds(),
+          target: timeStr, vcName: vcDisplayName, designIndex,
         });
-        await countdownMessage.edit({
-          files: [new AttachmentBuilder(buf, { name: 'countdown.png' })],
-        });
+        await countdownMessage.edit({ files: [new AttachmentBuilder(buf, { name: 'countdown.png' })] });
       } catch (e) {
         if (e.code === 10008 || e.message?.includes('Unknown Message')) {
           clearInterval(state.interval);
